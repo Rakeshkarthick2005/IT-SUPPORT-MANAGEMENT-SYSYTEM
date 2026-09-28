@@ -5,8 +5,8 @@ from datetime import datetime
 import os 
 import shutil
 from tkinter import filedialog
-import mysql.connector 
-
+import mysql.connector       
+    
 
 #demo theme.
 NAVY = "#102F5F"
@@ -1240,6 +1240,11 @@ def show_login_window():
     window.geometry("1280x760")
     maximize_window(window)
     window.configure(bg="#EEF4FC")
+
+    window.protocol(
+        "WM_DELETE_WINDOW",
+        window.destroy
+    )
 
     top = tk.Frame(window, bg="#17365D", height=52)
     top.pack(fill="x")
@@ -2536,6 +2541,7 @@ def my_tickets(user):
         connection.close()
 
     def show_ticket_details(event):
+
         selected = ticket_tree.selection()
         if not selected:
             return
@@ -2554,8 +2560,11 @@ def my_tickets(user):
             WHERE tickets.id = %s AND tickets.user_id = %s
         """, (ticket_id, user[0]))
         ticket = cursor.fetchone()
+
+    
         cursor.close()
         connection.close()
+
         if not ticket:
             messagebox.showerror("Error", "Ticket details could not be found.")
             return
@@ -2568,6 +2577,8 @@ def my_tickets(user):
             f"Ticket #{ticket[0]}",
             "Ticket details and resolution"
         )
+
+
         table_frame = tk.Frame(
             details,
             bg=BACKGROUND
@@ -2652,7 +2663,7 @@ def my_tickets(user):
             ).pack(
                 side="left",
                 padx=12,
-                pady=8
+                pady=5
             )
 
             tk.Label(
@@ -2680,6 +2691,108 @@ def my_tickets(user):
             pady=(0, 15)
         )
 
+                # ---------- RESOLUTION VERIFICATION ----------
+        if ticket[5] == "RESOLVED":
+
+            def confirm_resolution():
+                confirm = messagebox.askyesno(
+                    "Confirm Resolution",
+                    "Is the issue completely resolved?",
+                    parent=details
+                )
+
+                if not confirm:
+                    return
+
+                connection = get_connection()
+                cursor = connection.cursor()
+
+                cursor.execute(
+                    """
+                    UPDATE tickets
+                    SET status = 'CLOSED',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    AND user_id = %s
+                    AND status = 'RESOLVED'
+                    """,
+                    (ticket[0], user[0])
+                )
+
+                connection.commit()
+                cursor.close()
+                connection.close()
+
+                messagebox.showinfo(
+                    "Ticket Closed",
+                    "The ticket has been closed successfully.",
+                    parent=details
+                )
+
+                details.destroy()
+                load_tickets()
+
+            def issue_still_exists():
+                confirm = messagebox.askyesno(
+                    "Issue Still Exists",
+                    "Is the issue still present?",
+                    parent=details
+                )
+
+                if not confirm:
+                    return
+
+                connection = get_connection()
+                cursor = connection.cursor()
+
+                cursor.execute(
+                    """
+                    UPDATE tickets
+                    SET status = 'REOPENED',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    AND user_id = %s
+                    AND status = 'RESOLVED'
+                    """,
+                    (ticket[0], user[0])
+                )
+
+                connection.commit()
+                cursor.close()
+                connection.close()
+
+                messagebox.showinfo(
+                    "Ticket Reopened",
+                    "The ticket has been reopened and will be sent back to IT Support.",
+                    parent=details
+                )
+
+                details.destroy()
+                load_tickets()
+
+            add_button(
+                actions,
+                "Confirm Resolution",
+                confirm_resolution,
+                20
+            ).pack(
+                side="left",
+                padx=5
+            )
+
+            add_button(
+                actions,
+                "Issue Still Exists",
+                issue_still_exists,
+                20,
+                True
+            ).pack(
+                side="left",
+                padx=5
+            )
+
+        
+
         add_button(
             actions,
             "View Ticket History",
@@ -2692,8 +2805,22 @@ def my_tickets(user):
 
         add_button(
             actions,
+            "Comments",
+            lambda: show_comments_window(ticket[0]),
+            14
+        ).pack(
+            side="left",
+            padx=5
+        )
+
+        def close_ticket_details():
+
+            details.destroy()
+
+        add_button(
+            actions,
             "Close",
-            details.destroy,
+            close_ticket_details,
             12,
             True
         ).pack(
@@ -2715,6 +2842,373 @@ def my_tickets(user):
         True
     ).pack(side="bottom", pady=(0, 15))
 
+    def show_comments_window(ticket_id):
+
+        comments_window = tk.Toplevel(tickets_window)
+
+        setup_window(
+            comments_window,
+            f"Comments - Ticket #{ticket_id}",
+            "800x600"
+        )
+
+        maximize_window(comments_window)
+
+        add_header(
+            comments_window,
+            f"Comments - Ticket #{ticket_id}",
+            "View and add ticket comments"
+        )
+
+    # =========================================================
+    # COMMENTS LIST
+    # =========================================================
+
+        list_container = tk.Frame(
+            comments_window,
+            bg=BACKGROUND
+        )
+
+        list_container.pack(
+            fill="both",
+            expand=True,
+            padx=25,
+            pady=(15, 10)
+        )
+
+        comments_canvas = tk.Canvas(
+            list_container,
+            bg=BACKGROUND,
+            highlightthickness=0
+        )
+
+        comments_scrollbar = ttk.Scrollbar(
+            list_container,
+            orient="vertical",
+            command=comments_canvas.yview
+        )
+
+        comments_canvas.configure(
+            yscrollcommand=comments_scrollbar.set
+        )
+
+        comments_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        comments_canvas.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        comments_frame = tk.Frame(
+            comments_canvas,
+            bg=BACKGROUND
+        )
+
+        comments_canvas_window = comments_canvas.create_window(
+            (0, 0),
+            window=comments_frame,
+            anchor="nw"
+        )
+
+        def update_comments_scroll(event=None):
+
+            comments_canvas.configure(
+                scrollregion=comments_canvas.bbox("all")
+            )
+
+        comments_frame.bind(
+            "<Configure>",
+            update_comments_scroll
+        )
+
+        def resize_comments_frame(event):
+
+            comments_canvas.itemconfig(
+                comments_canvas_window,
+                width=event.width
+            )
+
+        comments_canvas.bind(
+            "<Configure>",
+            resize_comments_frame
+        )
+
+    # =========================================================
+    # LOAD COMMENTS
+    # =========================================================
+
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                users.name,
+                users.role,
+                users.department,
+                ticket_comments.comment,
+                ticket_comments.created_at
+            FROM ticket_comments
+            JOIN users
+                ON ticket_comments.user_id = users.id
+            WHERE ticket_comments.ticket_id = %s
+            ORDER BY ticket_comments.created_at ASC
+            """,
+            (ticket_id,)
+        )
+
+        comments = cursor.fetchall()
+
+        cursor.close()
+        connection.close()
+
+        if comments:
+
+            for name, role, department, comment_text, created_at in comments:
+
+                comment_box = tk.Frame(
+                    comments_frame,
+                    bg=WHITE,
+                    highlightbackground="#D7E4FA",
+                    highlightthickness=1
+                )
+
+                comment_box.pack(
+                    fill="x"
+                )
+
+                tk.Label(
+                    comment_box,
+                    text=f"{name} — {role}" if role == "IT Support" else f"{name} — {department}",
+                    bg=WHITE,
+                    fg="#0B1F42",
+                    font=("Arial", 10, "bold"),
+                    anchor="w"
+                ).pack(
+                    fill="x",
+                    padx=12,
+                    pady=(8, 0)
+                )
+
+                tk.Label(
+                    comment_box,
+                    text=str(comment_text),
+                    bg=WHITE,
+                    fg="#536987",
+                    font=("Arial", 10),
+                    anchor="w",
+                    justify="left",
+                    wraplength=650
+                ).pack(
+                    fill="x",
+                    padx=12,
+                    pady=(4, 2)
+                )
+
+                tk.Label(
+                    comment_box,
+                    text=str(created_at),
+                    bg=WHITE,
+                    fg="#7A8CA5",
+                    font=("Arial", 9),
+                    anchor="w"
+                ).pack(
+                    fill="x",
+                    padx=12,
+                    pady=(0, 8)
+                )
+
+        else:
+
+            tk.Label(
+                comments_frame,
+                text="No comments yet.",
+                bg=BACKGROUND,
+                fg="#7A8CA5",
+                font=("Arial", 10)
+            ).pack(
+                pady=30
+            )
+
+
+
+    # =========================================================
+    # CHECK TICKET STATUS
+    # =========================================================
+
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT status
+            FROM tickets
+            WHERE id = %s
+            """,
+            (ticket_id,)
+        )
+
+        ticket_status = cursor.fetchone()
+
+        cursor.close()
+        connection.close()
+
+        # =========================================================
+        # ADD COMMENT
+        # =========================================================
+
+        if ticket_status and str(ticket_status[0]).upper() != "CLOSED":
+
+            input_frame = tk.Frame(
+                comments_window,
+                bg=BACKGROUND
+            )
+
+            input_frame.pack(
+                fill="x",
+                padx=25,
+                pady=(0, 10)
+            )
+
+            tk.Label(
+                input_frame,
+                text="Add Comment",
+                bg=BACKGROUND,
+                fg="#0B1F42",
+                font=("Arial", 10, "bold")
+            ).pack(
+                anchor="w"
+            )
+
+            comment_entry = tk.Text(
+                input_frame,
+                height=2,
+                font=("Arial", 10),
+                wrap="word"
+            )
+
+            comment_entry.pack(
+                fill="x",
+                pady=(5, 8)
+            )
+
+            def add_employee_comment():
+
+                comment_text = comment_entry.get(
+                    "1.0",
+                    tk.END
+                ).strip()
+
+                if not comment_text:
+
+                    messagebox.showwarning(
+                        "Empty Comment",
+                        "Please enter a comment.",
+                        parent=comments_window
+                    )
+
+                    return
+
+                connection = get_connection()
+                cursor = connection.cursor()
+
+                cursor.execute(
+                    """
+                    INSERT INTO ticket_comments
+                    (
+                        ticket_id,
+                        user_id,
+                        comment
+                    )
+                    VALUES
+                    (
+                        %s,
+                        %s,
+                        %s
+                    )
+                    """,
+                    (
+                        ticket_id,
+                        user[0],
+                        comment_text
+                    )
+                )
+
+                # Get assigned IT Support
+                cursor.execute(
+                    """
+                    SELECT assigned_to
+                    FROM tickets
+                    WHERE id = %s
+                    """,
+                    (ticket_id,)
+                )
+
+                assigned_to = cursor.fetchone()
+
+                if assigned_to and assigned_to[0]:
+
+                    add_notification(
+                        cursor,
+                        assigned_to[0],
+                        ticket_id,
+                        f"Employee added a new comment to Ticket #{ticket_id}."
+                    )
+
+                connection.commit()
+
+                cursor.close()
+                connection.close()
+
+                messagebox.showinfo(
+                    "Comment Added",
+                    "Your comment has been added successfully.",
+                    parent=comments_window
+                )
+
+                comments_window.destroy()
+
+                show_comments_window(ticket_id)
+
+            add_button(
+                input_frame,
+                "Add Comment",
+                add_employee_comment,
+                14
+            ).pack(
+                anchor="e"
+            )
+
+        else:
+
+            tk.Label(
+                comments_window,
+                text="This ticket is closed. Comments can only be viewed.",
+                bg=BACKGROUND,
+                fg="#B3261E",
+                font=("Arial", 10, "bold")
+            ).pack(
+                padx=25,
+                pady=(5, 15)
+            )
+
+        # =========================================================
+        # CLOSE
+        # =========================================================
+
+        add_button(
+            comments_window,
+            "Close",
+            comments_window.destroy,
+            12,
+            True
+        ).pack(
+            pady=(0, 15)
+        )
 
 def admin_dashboard(user):
     for child in window.winfo_children():
@@ -4195,10 +4689,19 @@ def admin_dashboard(user):
     tk.Label(filter_frame, text="Show tickets:", bg=BACKGROUND, fg=TEXT,
              font=("Arial", 10, "bold")).pack(side="left")
     status_filter_var = tk.StringVar(value="All")
+
     status_filter = ttk.Combobox(
         filter_frame,
         textvariable=status_filter_var,
-        values=["All", "OPEN", "ASSIGNED", "IN PROGRESS", "RESOLVED"],
+        values=[
+            "All",
+            "OPEN",
+            "ASSIGNED",
+            "IN PROGRESS",
+            "RESOLVED",
+            "CLOSED",
+            "REOPENED"
+        ],
         state="readonly",
         width=16
     )
@@ -4207,6 +4710,7 @@ def admin_dashboard(user):
         "<<ComboboxSelected>>",
         lambda event: load_tickets()
     )
+
     status_filter.pack(side="left", padx=8)
     tk.Label(
         filter_frame,
@@ -5180,10 +5684,10 @@ def admin_dashboard(user):
         """
         conditions = []
         params = []
-
         if status_filter_var.get() != "All":
             conditions.append("tickets.status = %s")
             params.append(status_filter_var.get())
+
         if employee_filter_var.get() != "All Employees":
             conditions.append("employee.username = %s")
             params.append(
@@ -5191,7 +5695,6 @@ def admin_dashboard(user):
             )
 
         search_text = search_var.get().strip()
-        
 
         if search_text:
             conditions.append("""
@@ -5204,6 +5707,7 @@ def admin_dashboard(user):
                     OR support_staff.username LIKE %s
                 )
             """)
+
             search_pattern = f"%{search_text}%"
             params.extend([search_pattern] * 6)
 
@@ -5213,12 +5717,13 @@ def admin_dashboard(user):
         query += " ORDER BY tickets.id DESC"
 
         cursor.execute(query, tuple(params))
+
         for ticket in cursor.fetchall():
             insert_category_ticket(ticket_tree, ticket, 3)
-            
+
         cursor.close()
         connection.close()
-
+        
     def assign_ticket():
         selected = ticket_tree.selection()
         if not selected or not staff_var.get():
@@ -5313,6 +5818,26 @@ def admin_dashboard(user):
         """, (ticket_id,))
 
         ticket = cursor.fetchone()
+
+    # --------------------------------------------------
+    # COMMENTS
+    # --------------------------------------------------
+
+        cursor.execute("""
+            SELECT
+                users.name,
+                users.role,
+                users.department,
+                ticket_comments.comment,
+                ticket_comments.created_at
+            FROM ticket_comments
+            JOIN users
+                ON ticket_comments.user_id = users.id
+            WHERE ticket_comments.ticket_id = %s
+            ORDER BY ticket_comments.created_at ASC
+        """, (ticket_id,))
+
+        comments = cursor.fetchall()
 
         cursor.close()
         connection.close()
@@ -5421,6 +5946,113 @@ def admin_dashboard(user):
                 )
             )
 
+    # --------------------------------------------------
+    # COMMENTS
+    # --------------------------------------------------
+
+        comments_label = tk.Label(
+            details,
+            text="Comments",
+            bg=BACKGROUND,
+            fg=NAVY,
+            font=("Arial", 12, "bold")
+        )
+
+        comments_label.pack(
+            anchor="w",
+            padx=60,
+            pady=(5, 5)
+        )
+
+        comments_box = tk.Frame(
+            details,
+            bg=WHITE,
+            highlightbackground="#D7E4FA",
+            highlightthickness=1
+        )
+
+        comments_box.pack(
+            fill="x",
+            padx=60,
+            pady=(0, 10)
+        )
+
+        if comments:
+
+            for name, role, department, comment_text, created_at in comments:
+
+                comment_frame = tk.Frame(
+                    comments_box,
+                    bg="#F7FAFF",
+                    highlightbackground="#E1EAF8",
+                    highlightthickness=1
+                )
+
+                comment_frame.pack(
+                    fill="x",
+                    padx=10,
+                    pady=5
+                )
+
+                tk.Label(
+                    comment_frame,
+                    text=(
+                        f"{name} — {role}"
+                        if role == "IT Support"
+                        else f"{name} — {department}"
+                    ),
+                    bg="#F7FAFF",
+                    fg=NAVY,
+                    font=("Arial", 10, "bold")
+                ).pack(
+                    anchor="w",
+                    padx=10,
+                    pady=(8, 2)
+                )
+
+                tk.Label(
+                    comment_frame,
+                    text=str(comment_text),
+                    bg="#F7FAFF",
+                    fg="#536987",
+                    font=("Arial", 10),
+                    justify="left",
+                    anchor="w",
+                    wraplength=750
+                ).pack(
+                    fill="x",
+                    padx=10,
+                    pady=(0, 4)
+                )
+
+                tk.Label(
+                    comment_frame,
+                    text=(
+                        created_at.strftime("%d-%m-%Y %H:%M")
+                        if created_at
+                        else ""
+                    ),
+                    bg="#F7FAFF",
+                    fg="#8A9AB8",
+                    font=("Arial", 8)
+                ).pack(
+                    anchor="e",
+                    padx=10,
+                    pady=(0, 8)
+                )
+
+        else:
+
+            tk.Label(
+                comments_box,
+                text="No comments yet.",
+                bg=WHITE,
+                fg="#6076A4",
+                font=("Arial", 10)
+            ).pack(
+                pady=15
+            )
+
         # --------------------------------------------------
         # VIEW HISTORY
         # --------------------------------------------------
@@ -5451,7 +6083,10 @@ def it_support_dashboard(user):
     support_window = window
     setup_window(support_window, "IT Support Dashboard", "820x540")
     maximize_window(support_window)
-    support_window.protocol("WM_DELETE_WINDOW", support_window.destroy)
+    support_window.protocol(
+        "WM_DELETE_WINDOW",
+        show_login_window
+    )
     add_header(support_window, f"IT Support Dashboard - {user[1]}", "Tickets assigned to you")
     support_top_actions = tk.Frame(
         support_window,
@@ -5816,6 +6451,7 @@ def it_support_dashboard(user):
         connection = get_connection()
         cursor = connection.cursor()
 
+        # ---------- TICKET DETAILS ----------
         cursor.execute(
             """
             SELECT
@@ -5846,22 +6482,48 @@ def it_support_dashboard(user):
 
         ticket = cursor.fetchone()
 
-        cursor.close()
-        connection.close()
-
         if not ticket:
+
+            cursor.close()
+            connection.close()
+
             messagebox.showerror(
                 "Ticket Not Found",
                 "The selected ticket could not be found."
             )
+
             return
 
+        # ---------- COMMENTS ----------
+        cursor.execute(
+            """
+            SELECT
+                users.name,
+                users.role,
+                users.department,
+                ticket_comments.comment,
+                ticket_comments.created_at
+            FROM ticket_comments
+            JOIN users
+                ON ticket_comments.user_id = users.id
+            WHERE ticket_comments.ticket_id = %s
+            ORDER BY ticket_comments.created_at ASC
+            """,
+            (ticket_id,)
+        )
+
+        comments = cursor.fetchall()
+
+        cursor.close()
+        connection.close()
+
+        # ---------- DETAILS WINDOW ----------
         details = tk.Toplevel(support_window)
 
         setup_window(
             details,
             "Ticket Details",
-            "900x650"
+            "900x700"
         )
 
         maximize_window(details)
@@ -5869,8 +6531,12 @@ def it_support_dashboard(user):
         add_header(
             details,
             f"Ticket {ticket_id}",
-            "Employee and ticket details"
+            "Employee, ticket and comment details"
         )
+
+        # =========================================================
+        # TICKET DETAILS
+        # =========================================================
 
         table_frame = tk.Frame(
             details,
@@ -5878,10 +6544,9 @@ def it_support_dashboard(user):
         )
 
         table_frame.pack(
-            fill="both",
-            expand=True,
+            fill="x",
             padx=25,
-            pady=20
+            pady=(20, 10)
         )
 
         detail_rows = [
@@ -5922,7 +6587,7 @@ def it_support_dashboard(user):
             ).pack(
                 side="left",
                 padx=12,
-                pady=8
+                pady=5
             )
 
             tk.Label(
@@ -5942,15 +6607,260 @@ def it_support_dashboard(user):
                 pady=8
             )
 
-        add_button(
+        # =========================================================
+        # COMMENTS
+        # =========================================================
+
+        comments_frame = tk.Frame(
             details,
-            "Close",
-            details.destroy,
-            12,
-            True
-        ).pack(
-            pady=(0, 15)
+            bg=BACKGROUND
         )
+
+        comments_frame.pack(
+            fill="x",
+            padx=25,
+            pady=(5, 5)
+        )
+
+        tk.Label(
+            comments_frame,
+            text="Comments",
+            bg=BACKGROUND,
+            fg=NAVY,
+            font=("Arial", 12, "bold")
+        ).pack(
+            anchor="w",
+            pady=(5, 8)
+        )
+
+        comments_box = tk.Frame(
+            comments_frame,
+            bg=WHITE,
+            highlightbackground="#D7E4FA",
+            highlightthickness=1
+        )
+
+        comments_box.pack(
+            fill="both",
+            expand=True
+        )
+
+        if comments:
+
+            for name, role, department, comment_text, created_at in comments:
+
+                comment_frame = tk.Frame(
+                    comments_box,
+                    bg="#F7FAFF",
+                    highlightbackground="#E1EAF8",
+                    highlightthickness=1
+                )
+
+                comment_frame.pack(
+                    fill="x",
+                    padx=10,
+                    pady=5
+                )
+
+                # Username / Role / Department
+                tk.Label(
+                    comment_frame,
+                    text=(
+                        f"{name} — {role}"
+                        if role == "IT Support"
+                        else f"{name} — {department}"
+                    ),
+                    bg="#F7FAFF",
+                    fg=NAVY,
+                    font=("Arial", 10, "bold")
+                ).pack(
+                    anchor="w",
+                    padx=10,
+                    pady=(8, 2)
+                )
+
+                # Comment
+                tk.Label(
+                    comment_frame,
+                    text=str(comment_text),
+                    bg="#F7FAFF",
+                    fg="#536987",
+                    font=("Arial", 10),
+                    justify="left",
+                    anchor="w",
+                    wraplength=750
+                ).pack(
+                    fill="x",
+                    padx=10,
+                    pady=(0, 4)
+                )
+
+                # Date / Time
+                tk.Label(
+                    comment_frame,
+                    text=(
+                        created_at.strftime("%d-%m-%Y %H:%M")
+                        if created_at
+                        else ""
+                    ),
+                    bg="#F7FAFF",
+                    fg="#8A9AB8",
+                    font=("Arial", 8)
+                ).pack(
+                    anchor="e",
+                    padx=10,
+                    pady=(0, 8)
+                )
+
+        else:
+
+            tk.Label(
+                comments_box,
+                text="No comments yet.",
+                bg=WHITE,
+                fg="#6076A4",
+                font=("Arial", 10)
+            ).pack(
+                pady=20
+            )
+    # =========================================================
+    # ADD COMMENT
+    # =========================================================
+
+        if str(ticket[7]).upper() != "CLOSED":
+
+            input_frame = tk.Frame(
+                details,
+                bg=BACKGROUND
+            )
+
+            input_frame.pack(
+                fill="x",
+                padx=25,
+                pady=(0, 5)
+            )
+
+            tk.Label(
+                input_frame,
+                text="Add Comment",
+                bg=BACKGROUND,
+                fg=NAVY,
+                font=("Arial", 10, "bold")
+            ).pack(
+                anchor="w"
+            )
+
+            comment_entry = tk.Text(
+                input_frame,
+                height=2,
+                font=("Arial", 10),
+                wrap="word"
+            )
+
+            comment_entry.pack(
+                fill="x",
+                pady=(5, 8)
+            )
+
+            def add_it_support_comment():
+
+                comment_text = comment_entry.get(
+                    "1.0",
+                    tk.END
+                ).strip()
+
+                if not comment_text:
+
+                    messagebox.showwarning(
+                        "Empty Comment",
+                        "Please enter a comment.",
+                        parent=details
+                    )
+
+                    return
+
+                connection = get_connection()
+                cursor = connection.cursor()
+
+                cursor.execute(
+                    """
+                    INSERT INTO ticket_comments
+                    (
+                        ticket_id,
+                        user_id,
+                        comment
+                    )
+                    VALUES
+                    (
+                        %s,
+                        %s,
+                        %s
+                    )
+                    """,
+                    (
+                        ticket_id,
+                        user[0],
+                        comment_text
+                    )
+                )
+
+                # Get ticket owner (Employee)
+                cursor.execute(
+                    """
+                    SELECT user_id
+                    FROM tickets
+                    WHERE id = %s
+                    """,
+                    (ticket_id,)
+                )
+
+                ticket_owner = cursor.fetchone()
+
+                if ticket_owner and ticket_owner[0]:
+
+                    add_notification(
+                        cursor,
+                        ticket_owner[0],
+                        ticket_id,
+                        f"IT Support added a new comment to Ticket #{ticket_id}."
+                    )
+
+                connection.commit()
+
+                cursor.close()
+                connection.close()
+
+                messagebox.showinfo(
+                    "Comment Added",
+                    "Your comment has been added successfully.",
+                    parent=details
+                )
+
+                details.destroy()
+
+                show_ticket_details()
+
+            add_button(
+                input_frame,
+                "Add Comment",
+                add_it_support_comment,
+                14
+            ).pack(
+                anchor="e"
+            )
+
+        else:
+
+            tk.Label(
+                details,
+                text="This ticket is closed. Comments can only be viewed.",
+                bg=BACKGROUND,
+                fg="#B3261E",
+                font=("Arial", 10, "bold")
+            ).pack(
+                padx=25,
+                pady=(5, 15)
+            )
 
     def update_status():
         selected = ticket_tree.selection()
@@ -7539,6 +8449,10 @@ def show_reports(user):
     category_var = tk.StringVar(value="All Categories")
     priority_var = tk.StringVar(value="All Priorities")
 
+    month_var = tk.StringVar(value="All Months")
+    from_date_var = tk.StringVar()
+    to_date_var = tk.StringVar()
+
     employee_lookup = {}
 
     # -------------------------------------------------
@@ -7585,7 +8499,9 @@ def show_reports(user):
             "OPEN",
             "ASSIGNED",
             "IN PROGRESS",
-            "RESOLVED"
+            "RESOLVED",
+            "CLOSED",
+            "REOPENED"
         ],
         state="readonly",
         width=15
@@ -7663,6 +8579,144 @@ def show_reports(user):
     priority_filter.pack(side="left", padx=(0, 15))
 
     # -------------------------------------------------
+    # DATE FILTERS
+    # -------------------------------------------------
+
+    date_filter_frame = tk.Frame(
+        filter_card,
+        bg=WHITE
+    )
+
+    date_filter_frame.pack(
+        fill="x",
+        padx=15,
+        pady=(0, 12)
+    )
+
+    # MONTH
+
+    tk.Label(
+        date_filter_frame,
+        text="Month",
+        bg=WHITE,
+        fg=NAVY,
+        font=("Arial", 9, "bold")
+    ).pack(side="left", padx=(0, 5))
+
+    month_filter = ttk.Combobox(
+        date_filter_frame,
+        textvariable=month_var,
+        values=[
+            "All Months",
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December"
+        ],
+        state="readonly",
+        width=15
+    )
+
+    month_filter.pack(
+        side="left",
+        padx=(0, 15)
+    )
+
+    # FROM DATE
+
+    tk.Label(
+        date_filter_frame,
+        text="From Date",
+        bg=WHITE,
+        fg=NAVY,
+        font=("Arial", 9, "bold")
+    ).pack(side="left", padx=(0, 5))
+
+    from_date_entry = tk.Entry(
+        date_filter_frame,
+        textvariable=from_date_var,
+        width=13,
+        font=("Arial", 9)
+    )
+
+    from_date_entry.pack(
+        side="left",
+        padx=(0, 15),
+        ipady=3
+    )
+
+    # TO DATE
+
+    tk.Label(
+        date_filter_frame,
+        text="To Date",
+        bg=WHITE,
+        fg=NAVY,
+        font=("Arial", 9, "bold")
+    ).pack(side="left", padx=(0, 5))
+
+    to_date_entry = tk.Entry(
+        date_filter_frame,
+        textvariable=to_date_var,
+        width=13,
+        font=("Arial", 9)
+    )
+
+    to_date_entry.pack(
+        side="left",
+        padx=(0, 15),
+        ipady=3
+    )
+
+    # APPLY
+
+    apply_date_button = add_button(
+        date_filter_frame,
+        "Apply",
+        lambda: load_report_data(),
+        10
+    )
+
+    apply_date_button.pack(
+        side="left",
+        padx=3
+    )
+
+    # CLEAR
+
+    clear_date_button = add_button(
+        date_filter_frame,
+        "Clear",
+        lambda: clear_date_filters(),
+        10,
+        True
+    )
+
+    clear_date_button.pack(
+        side="left",
+        padx=3
+    )
+
+    tk.Label(
+        date_filter_frame,
+        text="Format: YYYY-MM-DD",
+        bg=WHITE,
+        fg="#6076A4",
+        font=("Arial", 8)
+    ).pack(
+        side="left",
+        padx=(10, 0)
+    )
+
+    # -------------------------------------------------
     # SUMMARY CARDS
     # -------------------------------------------------
 
@@ -7681,7 +8735,9 @@ def show_reports(user):
         "OPEN": tk.StringVar(value="0"),
         "ASSIGNED": tk.StringVar(value="0"),
         "IN PROGRESS": tk.StringVar(value="0"),
-        "RESOLVED": tk.StringVar(value="0")
+        "RESOLVED": tk.StringVar(value="0"),
+        "CLOSED": tk.StringVar(value="0"),
+        "REOPENED": tk.StringVar(value="0")
     }
 
     summary_colors = {
@@ -7689,7 +8745,9 @@ def show_reports(user):
         "OPEN": "#FFF8D8",
         "ASSIGNED": "#EEF2FF",
         "IN PROGRESS": "#E8F4FF",
-        "RESOLVED": "#E8F8EE"
+        "RESOLVED": "#E8F8EE",
+        "CLOSED": "#E8F8EE",
+        "REOPENED": "#FFE8E8"
     }
 
     for status, variable in summary_vars.items():
@@ -7744,28 +8802,35 @@ def show_reports(user):
         pady=(0, 15)
     )
 
-    # TOP ROW
+   # TOP ROW
 
     top_chart_frame = tk.Frame(
         chart_container,
-        bg=BACKGROUND
+        bg=BACKGROUND,
+        height=230
     )
+
     top_chart_frame.pack(
-        fill="both",
-        expand=True,
+        fill="x",
         pady=(0, 8)
     )
+
+    top_chart_frame.pack_propagate(False)
+
 
     # BOTTOM ROW
 
     bottom_chart_frame = tk.Frame(
         chart_container,
-        bg=BACKGROUND
+        bg=BACKGROUND,
+        height=230
     )
+
     bottom_chart_frame.pack(
-        fill="both",
-        expand=True
+        fill="x"
     )
+
+    bottom_chart_frame.pack_propagate(False)
 
     # -------------------------------------------------
     # CHART 1 - STATUS
@@ -8130,6 +9195,14 @@ def show_reports(user):
     # LOAD REPORT DATA
     # -------------------------------------------------
 
+    def clear_date_filters():
+    
+        month_var.set("All Months")
+        from_date_var.set("")
+        to_date_var.set("")
+
+        load_report_data()
+    
     def load_report_data(event=None):
 
         connection = get_connection()
@@ -8186,6 +9259,101 @@ def show_reports(user):
                 priority_var.get()
             )
 
+                # MONTH FILTER
+
+        if month_var.get() != "All Months":
+
+            month_number = [
+                "January",
+                "February",
+                "March",
+                "April",
+                "May",
+                "June",
+                "July",
+                "August",
+                "September",
+                "October",
+                "November",
+                "December"
+            ].index(month_var.get()) + 1
+
+            conditions.append(
+                "MONTH(tickets.created_at) = %s"
+            )
+
+            params.append(
+                month_number
+            )
+
+        # FROM DATE FILTER
+
+        from_date = from_date_var.get().strip()
+
+        if from_date:
+
+            try:
+                datetime.strptime(
+                    from_date,
+                    "%Y-%m-%d"
+                )
+            except ValueError:
+                messagebox.showwarning(
+                    "Invalid Date",
+                    "From Date must be in YYYY-MM-DD format.",
+                    parent=report_window
+                )
+                return
+
+            conditions.append(
+                "DATE(tickets.created_at) >= %s"
+            )
+
+            params.append(
+                from_date
+            )
+
+        # TO DATE FILTER
+
+        to_date = to_date_var.get().strip()
+
+        if to_date:
+
+            try:
+                datetime.strptime(
+                    to_date,
+                    "%Y-%m-%d"
+                )
+            except ValueError:
+                messagebox.showwarning(
+                    "Invalid Date",
+                    "To Date must be in YYYY-MM-DD format.",
+                    parent=report_window
+                )
+                return
+
+            conditions.append(
+                "DATE(tickets.created_at) <= %s"
+            )
+
+            params.append(
+                to_date
+            )
+
+        # DATE RANGE VALIDATION
+
+        if from_date and to_date:
+
+            if from_date > to_date:
+
+                messagebox.showwarning(
+                    "Invalid Date Range",
+                    "From Date cannot be later than To Date.",
+                    parent=report_window
+                )
+
+                return
+
         if conditions:
 
             where_clause = (
@@ -8222,7 +9390,9 @@ def show_reports(user):
             "OPEN",
             "ASSIGNED",
             "IN PROGRESS",
-            "RESOLVED"
+            "RESOLVED",
+            "CLOSED",
+            "REOPENED"
         ):
 
             status_conditions = list(conditions)
@@ -8280,7 +9450,9 @@ def show_reports(user):
             "OPEN",
             "ASSIGNED",
             "IN PROGRESS",
-            "RESOLVED"
+            "RESOLVED",
+            "CLOSED",
+            "REOPENED"
         ]
 
         status_dict = {
